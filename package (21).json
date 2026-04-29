@@ -1,0 +1,46 @@
+export type Role = "teacher" | "student";
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  name: string;
+  role: Role;
+  teacherId?: string;
+}
+
+export interface Question {
+  id: string;
+  text: string;
+  options: string[];
+  correctIndex: number;
+}
+
+export interface Exam {
+  id: string;
+  title: string;
+  teacherId: string;
+  teacherName: string;
+  studentIds: string[];
+  questions: Question[];
+  createdAt: number;
+  durationMinutes: number;
+  scheduledAt?: number;
+  description?: string;
+}
+
+export interface Answer {
+  questionId: string;
+  selectedIndex: number;
+}
+
+export interface ExamResult {
+  id: string;
+  examId: string;
+  examTitle: string;
+  studentId: string;
+  studentName: string;
+  answers: Answer[];
+  score: number;
+  totalQuestions: number;
+  submittedAt: number;
+}

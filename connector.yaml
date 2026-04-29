@@ -1,0 +1,278 @@
+"use client";
+
+export const dynamic = "force-dynamic";
+
+import { useEffect, useState } from "react";
+import { collection, query, where, getDocs, addDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { useAuth } from "@/app/_context/AuthContext";
+import { Question, UserProfile } from "@/lib/types";
+import { useRouter } from "next/navigation";
+
+const emptyQuestion = (): Question => ({
+  id: crypto.randomUUID(),
+  text: "",
+  options: ["", "", "", ""],
+  correctIndex: 0,
+});
+
+export default function CreateExamPage() {
+  const { profile } = useAuth();
+  const router = useRouter();
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [duration, setDuration] = useState(30);
+  const [scheduledAt, setScheduledAt] = useState("");
+  const [questions, setQuestions] = useState<Question[]>([emptyQuestion()]);
+  const [students, setStudents] = useState<UserProfile[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!profile) return;
+    getDocs(
+      query(collection(db, "users"), where("teacherId", "==", profile.uid), where("role", "==", "student"))
+    ).then((snap) => setStudents(snap.docs.map((d) => d.data() as UserProfile)));
+  }, [profile]);
+
+  function setQuestion(index: number, partial: Partial<Question>) {
+    setQuestions((prev) => prev.map((q, i) => (i === index ? { ...q, ...partial } : q)));
+  }
+
+  function setOption(qIndex: number, oIndex: number, value: string) {
+    setQuestions((prev) =>
+      prev.map((q, i) => {
+        if (i !== qIndex) return q;
+        const options = [...q.options];
+        options[oIndex] = value;
+        return { ...q, options };
+      })
+    );
+  }
+
+  function toggleStudent(uid: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(uid) ? next.delete(uid) : next.add(uid);
+      return next;
+    });
+  }
+
+  function selectAll() {
+    setSelectedIds(new Set(students.map((s) => s.uid)));
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+
+    if (questions.some((q) => !q.text.trim() || q.options.some((o) => !o.trim()))) {
+      setError("Lütfen tüm soruları ve seçenekleri doldurun.");
+      return;
+    }
+    if (selectedIds.size === 0) {
+      setError("En az bir öğrenci seçin.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await addDoc(collection(db, "exams"), {
+        title,
+        description,
+        teacherId: profile!.uid,
+        teacherName: profile!.name,
+        studentIds: Array.from(selectedIds),
+        questions,
+        createdAt: Date.now(),
+        durationMinutes: duration,
+        scheduledAt: scheduledAt ? new Date(scheduledAt).getTime() : null,
+      });
+      router.push("/teacher/exams/results");
+    } catch {
+      setError("Sınav kaydedilemedi. Tekrar deneyin.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="max-w-3xl">
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold text-gray-900">Sınav Oluştur</h2>
+        <p className="text-gray-500 text-sm mt-1">Soruları ekleyin, program belirleyin ve öğrencileri seçin.</p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-5">
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 space-y-4">
+          <h3 className="font-semibold text-gray-800 text-sm uppercase tracking-wide text-gray-500">Sınav Bilgileri</h3>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Sınav Başlığı</label>
+            <input
+              required
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              placeholder="Örn: Matematik Konu Testi"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Açıklama (opsiyonel)</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+              placeholder="Sınav hakkında kısa bir açıklama..."
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Süre (dakika)</label>
+              <input
+                type="number"
+                min={5}
+                max={180}
+                required
+                value={duration}
+                onChange={(e) => setDuration(Number(e.target.value))}
+                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Sınav Tarihi & Saati</label>
+              <input
+                type="datetime-local"
+                value={scheduledAt}
+                onChange={(e) => setScheduledAt(e.target.value)}
+                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-gray-200 p-6">
+          <h3 className="font-semibold text-sm uppercase tracking-wide text-gray-500 mb-5">Sorular</h3>
+          <div className="space-y-5">
+            {questions.map((q, qi) => (
+              <div key={q.id} className="border border-gray-100 rounded-xl p-5 bg-gray-50/50">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-semibold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">
+                    Soru {qi + 1}
+                  </span>
+                  {questions.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setQuestions((prev) => prev.filter((_, i) => i !== qi))}
+                      className="text-xs text-red-400 hover:text-red-600 transition"
+                    >
+                      Kaldır
+                    </button>
+                  )}
+                </div>
+                <input
+                  required
+                  value={q.text}
+                  onChange={(e) => setQuestion(qi, { text: e.target.value })}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm mb-3 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  placeholder="Soru metni..."
+                />
+                <div className="space-y-2">
+                  {q.options.map((opt, oi) => (
+                    <div key={oi} className="flex items-center gap-3">
+                      <input
+                        type="radio"
+                        name={`correct-${q.id}`}
+                        checked={q.correctIndex === oi}
+                        onChange={() => setQuestion(qi, { correctIndex: oi })}
+                        className="accent-indigo-600 w-4 h-4 shrink-0"
+                      />
+                      <span className="text-xs font-bold text-gray-400 w-4">{String.fromCharCode(65 + oi)}</span>
+                      <input
+                        required
+                        value={opt}
+                        onChange={(e) => setOption(qi, oi, e.target.value)}
+                        className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        placeholder={`Seçenek ${String.fromCharCode(65 + oi)}`}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-400 mt-3">Doğru cevap için soldaki radyo butonunu işaretleyin.</p>
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setQuestions((prev) => [...prev, emptyQuestion()])}
+            className="mt-4 text-sm text-indigo-600 hover:text-indigo-800 font-semibold transition"
+          >
+            + Soru Ekle
+          </button>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-sm uppercase tracking-wide text-gray-500">
+              Öğrenci Seç <span className="text-indigo-600 normal-case">({selectedIds.size}/{students.length})</span>
+            </h3>
+            {students.length > 0 && (
+              <button type="button" onClick={selectAll} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium transition">
+                Tümünü Seç
+              </button>
+            )}
+          </div>
+          {students.length === 0 ? (
+            <p className="text-sm text-gray-400">Sisteminizde kayıtlı öğrenci yok. Önce öğrenci ekleyin.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto">
+              {students.map((s) => (
+                <label
+                  key={s.uid}
+                  className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition ${
+                    selectedIds.has(s.uid) ? "border-indigo-300 bg-indigo-50" : "border-gray-100 hover:border-gray-200"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(s.uid)}
+                    onChange={() => toggleStudent(s.uid)}
+                    className="accent-indigo-600 w-4 h-4"
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-800 truncate">{s.name}</p>
+                    <p className="text-xs text-gray-400 truncate">{s.email}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+            <p className="text-red-600 text-sm">{error}</p>
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <button
+            type="submit"
+            disabled={saving}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-8 py-3 rounded-xl transition disabled:opacity-60 text-sm"
+          >
+            {saving ? "Kaydediliyor..." : "Sınavı Kaydet"}
+          </button>
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 font-semibold px-6 py-3 rounded-xl transition text-sm"
+          >
+            Vazgeç
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
